@@ -263,28 +263,32 @@ contract MaGaugeV2Upgradeable is OwnableUpgradeable, ReentrancyGuardUpgradeable,
         uint len = tokenIds.length;
         for ( uint i; i < len; i++) {
             getReward( tokenIds[i] );
-            _withdraw( tokenIds[i], _lpBalances[tokenIds[i]]);
+            _withdraw( tokenIds[i] );
         }
     }
 
     ///@notice withdraw a certain amount of TOKEN
-    function withdraw(uint _maNFTId, uint amount) external {
-        _withdraw(_maNFTId, amount);
+    function withdraw(uint _maNFTId) external {
+        getReward( _maNFTId );
+        _withdraw( _maNFTId );
     }
 
     ///@notice withdraw internal
     ///@dev  lastUpdate mapping should update
     ///      maturity mapping should update
-    function _withdraw(uint _maNFTId, uint amount) internal nonReentrant isNotEmergency updateReward(_maNFTId) {
+    function _withdraw(uint _maNFTId) internal nonReentrant isNotEmergency updateReward(_maNFTId) {
         require(_isApprovedOrOwner(_msgSender(), _maNFTId), "maNFT: caller is not token owner or approved");
 
+        uint amount = _lpBalances[_maNFTId];
+        
         require(amount > 0, "Cannot withdraw 0");
         require(_lpTotalSupply - amount >= 0, "supply < 0");
-        require(_lpBalances[_maNFTId] >= amount, "not enough balance");
 
         _lpTotalSupply = _lpTotalSupply - amount;
         _lpBalances[_maNFTId] = _lpBalances[_maNFTId] - amount;
 
+        _burn(_maNFTId);
+        
         //Not sure which one to use.
         TOKEN.safeTransfer(_msgSender(), amount);
         //TOKEN.safeTransfer(_ownerOf(_maNFTId), amount);
