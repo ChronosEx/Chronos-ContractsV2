@@ -5,6 +5,8 @@ require('@openzeppelin/hardhat-upgrades');
 require("@nomiclabs/hardhat-etherscan");
 require("hardhat-interface-generator");
 
+require("hardhat-contract-sizer");
+
 require("@nomiclabs/hardhat-web3");
 
 const { PRIVATEKEY, TESTPRIVATEKEY, APIKEY } = require("./pvkey.js")
@@ -24,7 +26,7 @@ module.exports = {
       },
     ]
   },
-  defaultNetwork: 'arbitrumOne',
+  defaultNetwork: 'hardhat',
 
   networks: {
 
@@ -46,6 +48,7 @@ module.exports = {
           url: "https://arb1.arbitrum.io/rpc",
           chainId: 42161,
       },
+      allowUnlimitedContractSize: true,
       //accounts: []
     }
   
