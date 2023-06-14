@@ -39,7 +39,7 @@ async function setup() {
     let _token = await deployedToken.deployed();
     console.log("LP token deployed at " + _token.address);
 
-    const MaGaugeV2Upgradeable = await ethers.getContractFactory("MaGaugeV2Upgradeable");
+    const MaGaugeV2Upgradeable = await ethers.getContractFactory("MaGaugeV2UpgradeableBatchRemove");
     let maNFTDeployed = await upgrades.deployProxy(
         MaGaugeV2Upgradeable,
         [
