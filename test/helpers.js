@@ -35,7 +35,7 @@ module.exports.mint = async function(account, amount, _token) {
 module.exports.depositAll = async function(account, _token, maNFT) {
     let balance = await _token.balanceOf(account.address);
     await _token.connect(account).approve(maNFT.address, balance);
-    await maNFT.connect(account).deposit(balance)
+    await maNFT.connect(account).depositAll()
     let id = await maNFT.totalSupply();
     return id;
 }

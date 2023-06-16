@@ -6,10 +6,7 @@ import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721Enumer
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-import "./libraries/BokkyPooBahsRedBlackTreeLibrary.sol";
 
 import "./interfaces/IPair.sol";
 import "./interfaces/IBribe.sol";
@@ -23,8 +20,6 @@ contract MaGaugeV2Upgradeable is
     ERC721EnumerableUpgradeable
 {
     using SafeERC20 for IERC20;
-    using BokkyPooBahsRedBlackTreeLibrary for BokkyPooBahsRedBlackTreeLibrary.Tree;
-    using EnumerableSet for EnumerableSet.UintSet;
 
     bool public isForPair;
     bool public emergency;
@@ -70,9 +65,12 @@ contract MaGaugeV2Upgradeable is
     mapping(uint => uint) public _positionEntries;
     mapping(uint => uint) private _positionLastWeights;
 
-    // red-black tree used for position entries sorting
-    BokkyPooBahsRedBlackTreeLibrary.Tree private _preLimitPositionEntriesTree;
-    mapping(uint => EnumerableSet.UintSet) private _preLimitEntryToPositionIds;
+    mapping(uint => uint) public _epochs;
+    uint public LP_LAST_EPOCH_ID;
+    uint private LP_EPOCH_DURATION;
+    uint private LP_EPOCH_COUNT;
+    uint private _lastLpUpdateInEpoch;
+    mapping(uint => uint) private _nftToEpochIds;
 
     event RewardAdded(uint reward);
     event Deposit(address indexed user, uint amount);
@@ -89,7 +87,7 @@ contract MaGaugeV2Upgradeable is
         _;
     }
 
-    ///@dev right now, this calculates the rewards normally, to implement maturity, we have to have in mind the weight of the tokenId, the total Weight, and the changes those make.
+    ///@dev the rewards are calculated based on total weight
     modifier updateReward(uint _maNFTId) {
         rewardPerTokenStored = rewardPerToken();
         lastUpdateTime = lastTimeRewardApplicable();
@@ -139,6 +137,7 @@ contract MaGaugeV2Upgradeable is
         ENTRY_CALCULATION_PRECISION = 1e18;     // entry calculation precision for merge/increase
 
         maturityIncrement = 3628800;            // 6 weeks
+        _initializeEpochs(86400 * 3);           // 3 days epoch
 
         internal_bribe = _internal_bribe;       // lp fees goes here
         external_bribe = _external_bribe;       // bribe fees goes here
@@ -271,7 +270,7 @@ contract MaGaugeV2Upgradeable is
     }
 
     ///@notice  reward for a single token
-    ///@dev If we want to add "maturity" instead of _lpTotalSupply we should use _totalWeight ( having in mind that _totalWeight has changed since last call because of linear increase on maturity)
+    ///@dev total weight is used instead of LP total supply
     function rewardPerToken() public view returns (uint) {
         if (_totalWeight == 0) {
             return rewardPerTokenStored;
@@ -401,11 +400,10 @@ contract MaGaugeV2Upgradeable is
        _removeFromPosition(
             _maNFTId,
             amount,
-            _maturityMultiplier(_maNFTId),
-            _positionEntries[_maNFTId]
+            _maturityMultiplier(_maNFTId)
         );
         _positionEntries[_maNFTId] = 0;
-
+        _nftToEpochIds[_maNFTId] = 0;
         _burn(_maNFTId);
 
         //Not sure which one to use.
@@ -434,9 +432,9 @@ contract MaGaugeV2Upgradeable is
 
         uint newAmount = _lpBalances[_maNFTId] + amount;
         uint newMultiplier = _maturityMultiplier(_maNFTId);
-
+        
+        _removeFromPosition(_maNFTId, oldAmount, oldMultiplier);
         _addToPosition(_maNFTId, newAmount, newMultiplier, newEntry);
-        _removeFromPosition(_maNFTId, oldAmount, oldMultiplier, oldEntry);
 
         emit Increase(_msgSender(), _maNFTId, oldAmount, newAmount);
     }
@@ -473,20 +471,19 @@ contract MaGaugeV2Upgradeable is
         _removeFromPosition(
             _maNFTIdFrom,
             _lpBalances[_maNFTIdFrom],
-            _maturityMultiplier(_maNFTIdFrom),
-            _positionEntries[_maNFTIdFrom]
+            _maturityMultiplier(_maNFTIdFrom)
         );
 
-        _addToPosition(_maNFTIdTo, newAmountTo, newMultiplierTo, newEntryTo);
         _removeFromPosition(
             _maNFTIdTo,
             oldAmountTo,
-            oldMultiplierTo,
-            oldEntryTo
+            oldMultiplierTo
         );
+        _addToPosition(_maNFTIdTo, newAmountTo, newMultiplierTo, newEntryTo);
 
         _burn(_maNFTIdFrom);
         _positionEntries[_maNFTIdFrom] = 0;
+        _nftToEpochIds[_maNFTIdFrom] = 0;
         emit Merge(_msgSender(), _maNFTIdFrom, _maNFTIdTo);
     }
 
@@ -504,10 +501,6 @@ contract MaGaugeV2Upgradeable is
 
         uint weightsSum = 0;
 
-        uint positionEntry = _positionEntries[_maNFTId];
-
-        bool preLimit = _maturityMultiplier(_maNFTId) < MATURITY_PRECISION * 3;
-
         for (uint i; i < weights.length; i++) {
             weightsSum += weights[i];
 
@@ -518,27 +511,18 @@ contract MaGaugeV2Upgradeable is
             tokenId++;
 
             _lpBalances[_newMANFTId] = splitAmount;
-            _positionEntries[_newMANFTId] = positionEntry;
-
-            // track ids if they are pre-limit
-            if (preLimit) {
-                _preLimitEntryToPositionIds[positionEntry].add(_newMANFTId);
-            }
+            _positionEntries[_newMANFTId] = _positionEntries[_maNFTId];
+            _nftToEpochIds[_newMANFTId] = _nftToEpochIds[_maNFTId];
         }
 
         // bps accuracy is used for e.g.
         require(weightsSum == WEIGHTS_MAX_POINTS, "Invalid weights sum"); 
 
-        if (preLimit) {
-            // remove id from ids per entry
-            _preLimitEntryToPositionIds[positionEntry].remove(_maNFTId);
-            // no need to check if it's the last id by timestamp since splitted ids exist
-        }
-
         // total weight doesn't change as liquidity and maturity didn't change
         _lpBalances[_maNFTId] = 0;
         _positionEntries[_maNFTId] = 0;
         _positionLastWeights[_maNFTId] = 0;
+        _nftToEpochIds[_maNFTId] = 0;
 
         _burn(_maNFTId);
         
@@ -565,10 +549,11 @@ contract MaGaugeV2Upgradeable is
         require(_amount > 0, "Cannot withdraw 0");
         require(lpTotalSupply() - _amount >= 0, "supply < 0");
 
-        _removeFromPosition(_maNFTId, _amount, _maturityMultiplier(_maNFTId), _positionEntries[_maNFTId]);
+        _removeFromPosition(_maNFTId, _amount, _maturityMultiplier(_maNFTId));
 
         _burn(_maNFTId);
         _positionEntries[_maNFTId] = 0;
+        _nftToEpochIds[_maNFTId] = 0;
 
         //Not sure which one to use.
         TOKEN.safeTransfer(_msgSender(), _amount);
@@ -576,6 +561,7 @@ contract MaGaugeV2Upgradeable is
         emit Withdraw(_msgSender(), _amount);
     }
 
+    ///@notice updates pool total weight
     function sync() external {
         _updateTotalWeight();
     }
@@ -650,61 +636,61 @@ contract MaGaugeV2Upgradeable is
         uint maturityDelta = block.timestamp - _lastTotalWeightUpdateTime;
         _weightIncrement = _weightIncrement + _lpTotalSupplyPreLimit * ((maturityDelta * MATURITY_PRECISION) / maturityIncrement);
         uint totalWeightWithoutLimit = _lpTotalSupplyPreLimit * MATURITY_PRECISION + _weightIncrement;
-
         // calculate the decrement for this weight for the positions that have reached the limit since last time
-        uint totalWeightDecrement = 0;
-
-        uint currentEntry = _preLimitPositionEntriesTree.first();
-        while (currentEntry + 2 * maturityIncrement <= block.timestamp) {
-            if (currentEntry == 0) {
-                break;
-            }
-
-            // process the entry which exceeds max multiplier limit.
-            // move its LP to the post-limit LP supply and remove the weight
-            // increment for its position from aggregated increment
-            for (uint i; i < _preLimitEntryToPositionIds[currentEntry].length(); i++) {
-                uint currentId = _preLimitEntryToPositionIds[currentEntry].at(i);
-
-                _lpTotalSupplyPreLimit -= _lpBalances[currentId];
-                _lpTotalSupplyPostLimit += _lpBalances[currentId];
-
-                // the weight increment pre-limit introduction should be removed from weight increment
-                uint positionWeightIncrement = 
-                    _lpBalances[currentId] * _maturityMultiplierNoLimit(currentId) - 
-                    _lpBalances[currentId] * MATURITY_PRECISION;
-
-                // the weight of the position is adjusted to the actual recorded increment
-                totalWeightDecrement += _lpBalances[currentId] * MATURITY_PRECISION + _reduceWeightIncrement(positionWeightIncrement);
-            }
-
-            // move to checking the next entry and cleanup old entry
-            uint oldEntry = currentEntry;
-            currentEntry = _preLimitPositionEntriesTree.next(oldEntry);
-            _preLimitPositionEntriesTree.remove(oldEntry);
-
-            delete _preLimitEntryToPositionIds[oldEntry];
-        }
+        uint totalWeightDecrement = _updateAndGetTotalDecrement();
 
         // calculate total weight
         _totalWeight = totalWeightWithoutLimit + _lpTotalSupplyPostLimit * MATURITY_PRECISION * 3 - totalWeightDecrement;
         _lastTotalWeightUpdateTime = block.timestamp;
     }
 
-    function _maturityMultiplierNoLimit(uint _maNFTId) private view returns (uint) {
+    ///@dev checks if at least 1 epoch has passed since last check, shifts position LPs, adjusts weight increment and last epoch id
+    function _updateAndGetTotalDecrement() private returns (uint totalWeightDecrement) {        
+        if (block.timestamp - _lastLpUpdateInEpoch >= LP_EPOCH_DURATION) {
+            // calculate how many epochs have passed
+            uint epochsShift = (block.timestamp - _lastLpUpdateInEpoch) / LP_EPOCH_DURATION;
+            for (uint i; i < epochsShift; i++) {
+                // adjust balances of pre and post limits by last LP
+                uint lastLP = _epochs[LP_EPOCH_COUNT - 1];
+                _lpTotalSupplyPreLimit -= lastLP;
+                _lpTotalSupplyPostLimit += lastLP;
+
+                // calculate the multiplier for the last epoch LP based on how many epochs passed
+                uint multiplier = MATURITY_PRECISION + ((LP_EPOCH_DURATION * (LP_EPOCH_COUNT + epochsShift - i)) * MATURITY_PRECISION) / maturityIncrement;
+                // reduce weight increment by the positions that have passed to the post limit
+                uint positionWeightIncrement = lastLP * multiplier - lastLP * MATURITY_PRECISION;
+
+                // the weight of the position is adjusted to the actual recorded increment
+                totalWeightDecrement += lastLP * MATURITY_PRECISION + _reduceWeightIncrement(positionWeightIncrement);
+
+                // shift balance of prev epoch to next epoch
+                uint currentEpoch = _epochs[0];
+                for (uint j; j < LP_EPOCH_COUNT - 1; j++) {
+                    uint oldEpoch = _epochs[j + 1];
+                    _epochs[j + 1] = currentEpoch;
+                    currentEpoch = oldEpoch;
+                }
+                _epochs[0] = 0;
+            }
+
+            // update last epoch based on how many epochs have passed
+            _lastLpUpdateInEpoch = _lastLpUpdateInEpoch + LP_EPOCH_DURATION * epochsShift;
+            // update index of last epoch based on shifts
+            LP_LAST_EPOCH_ID += epochsShift;
+        }
+
+    }
+
+    ///@dev calculates maturity multiplier based on the position maturity
+    function _maturityMultiplier(uint _maNFTId) private view returns (uint) {
         uint maturity = block.timestamp - _positionEntries[_maNFTId];
-        return
-            MATURITY_PRECISION +
+        if (maturity >= 2 * maturityIncrement) return MATURITY_PRECISION * 3;
+        else return MATURITY_PRECISION +
             (maturity * MATURITY_PRECISION) /
             maturityIncrement;
     }
 
-    function _maturityMultiplier(uint _maNFTId) private view returns (uint) {
-        uint maturity = block.timestamp - _positionEntries[_maNFTId];
-        if (maturity >= 2 * maturityIncrement) return MATURITY_PRECISION * 3;
-        else return _maturityMultiplierNoLimit(_maNFTId);
-    }
-
+    ///@dev calculates new entry based on the merged position entries and amounts
     function _getNewEntry(uint firstEntry, uint secondEntry, uint oldAmount, uint amountIncrement) private view returns(uint) {
         uint olderEntry;
         uint entryDiff;
@@ -719,6 +705,7 @@ contract MaGaugeV2Upgradeable is
         return newEntry;
     }
 
+    ///@dev adds the position weight to total weight, adjusts weight incement, adds postion LP to pool and individual position balance
     function _addToPosition(
         uint id,
         uint amount,
@@ -733,30 +720,19 @@ contract MaGaugeV2Upgradeable is
             _weightIncrement =
                 _weightIncrement +
                 (weight - amount * MATURITY_PRECISION);
-
-            _lpTotalSupplyPreLimit =
-                _lpTotalSupplyPreLimit +
-                amount;
-
-            // add new entry
-            if (!_preLimitPositionEntriesTree.exists(entry)) {
-                _preLimitPositionEntriesTree.insert(entry);
-            }
-            _preLimitEntryToPositionIds[entry].add(id);
-        } else {
-            _lpTotalSupplyPostLimit += amount;
         }
 
+        _increaseLP(id, amount, entry);
         _lpBalances[id] += amount;
         // not sure if last weight needs to be updated here or only after rewards calculation
         _positionLastWeights[id] = weight;
     }
 
+    ///@dev reduces the total weight by position weight (or remaining total weight), reduces weight increment by position weight, reduces LP balance of pool and position
     function _removeFromPosition(
         uint id,
         uint amount,
-        uint multiplier,
-        uint entry
+        uint multiplier
     ) private {
         uint weight = amount * multiplier;
 
@@ -771,26 +747,15 @@ contract MaGaugeV2Upgradeable is
 
         if (multiplier < MATURITY_PRECISION * 3) {
             _reduceWeightIncrement(weight - amount * MATURITY_PRECISION);
-            _lpTotalSupplyPreLimit =
-                _lpTotalSupplyPreLimit -
-                amount;
-
-            // remove old entry
-            _preLimitEntryToPositionIds[entry].remove(id);
-            // remove entry from tree if it's the only id
-            if (_preLimitEntryToPositionIds[entry].length() == 0) {
-                _preLimitPositionEntriesTree.remove(entry);
-                delete _preLimitEntryToPositionIds[entry];
-            }
-        } else {
-            _lpTotalSupplyPostLimit -= amount;
         }
 
+        _reduceLP(id, amount);
         _lpBalances[id] -= amount;
+        // not sure if last weight needs to be updated here or only after rewards calculation
+        _positionLastWeights[id] = weight;
     }
 
-    // due to the possible error in total weight precision, it's possible sum(position weight)
-    // is slightly > total weight. the following processing is to avoid underflow
+    ///@dev reduces weight due to the possible error in total weight precision, it's possible sum(position weight) is slightly > total weight. the following processing is to avoid underflow
     function _reduceWeightIncrement(uint amount) private returns (uint reduction) {
         if (amount > _weightIncrement) {
             reduction = _weightIncrement;
@@ -798,6 +763,39 @@ contract MaGaugeV2Upgradeable is
             reduction = amount;
         }
         _weightIncrement -= reduction;
+    }
+
+    ///@dev adds the LP to the epoch based on entry and stores the ID of that epoch for future withdrawals
+    function _increaseLP(uint id, uint amount, uint entry) private {
+        uint currentEpochIndex = (block.timestamp - entry) / LP_EPOCH_DURATION;
+        if (currentEpochIndex >= LP_EPOCH_COUNT) {
+            _lpTotalSupplyPostLimit += amount;
+        } else {
+            uint epochId = LP_LAST_EPOCH_ID - currentEpochIndex;
+            _epochs[currentEpochIndex] += amount;
+            _nftToEpochIds[id] = epochId;
+            _lpTotalSupplyPreLimit += amount;
+        }
+    }
+
+    ///@dev removes the LP from the particular epoch where the position's LP is located
+    function _reduceLP(uint id, uint amount) private {
+        uint epochId = _nftToEpochIds[id];
+        uint currentEpochIndex = LP_LAST_EPOCH_ID - epochId;
+        if (currentEpochIndex >= LP_EPOCH_COUNT) {
+            _lpTotalSupplyPostLimit -= amount;
+        } else {
+            _epochs[currentEpochIndex] -= amount;
+            _lpTotalSupplyPreLimit -= amount;
+        }
+    }
+
+    ///@dev creates epochs based on the duration. LP last epoch id is used to identify particular epoch where the position LP is located, that's necessary due to epoch shifts
+    function _initializeEpochs(uint epochDuration) private {
+        LP_EPOCH_DURATION = epochDuration;
+        LP_EPOCH_COUNT = (maturityIncrement * 2) / LP_EPOCH_DURATION;
+        LP_LAST_EPOCH_ID = LP_EPOCH_COUNT - 1;
+        _lastLpUpdateInEpoch = block.timestamp;
     }
 
 

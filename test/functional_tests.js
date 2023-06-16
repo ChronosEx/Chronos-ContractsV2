@@ -549,7 +549,7 @@ describe("MaGaugeV2Upgradeable: Maturity-related basic functional tests", functi
         }
 
         let actualTotalWeight = await maNFT.totalWeight();
-        let error = testError(expectedTotalWeight, actualTotalWeight);
+        testError(expectedTotalWeight, actualTotalWeight);
 
         // checking NFTs supply
         let nftSupplyPostWithdraw = await maNFT.totalSupply();

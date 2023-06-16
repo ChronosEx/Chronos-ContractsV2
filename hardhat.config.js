@@ -6,6 +6,7 @@ require("@nomiclabs/hardhat-etherscan");
 require("hardhat-interface-generator");
 
 require("hardhat-contract-sizer");
+require("hardhat-gas-reporter");
 
 require("@nomiclabs/hardhat-web3");
 

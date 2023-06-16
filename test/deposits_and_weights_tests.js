@@ -26,8 +26,8 @@ describe("MaGaugeV2Upgradeable: Deposits and weights tests", function () {
 
         let expectedLPSupply = BigNumber.from(0);
 
-        let count = 400;
-        let maxDelta = 3628800;
+        let count = 1000;
+        let maxDelta = 86400 * 14;
 
         let depositAmounts = [];
         let deltas = [];
@@ -78,10 +78,10 @@ describe("MaGaugeV2Upgradeable: Deposits and weights tests", function () {
             let actualTotalWeight = await maNFT.totalWeight();
 
             // it is expected to have an error in weight increment due to the maturity precision
-            let error = testError(expectedTotal, actualTotalWeight);
             console.log("Exp weight = " + expectedTotal);
             console.log("Act weight = " + actualTotalWeight);
-            console.log("Error = " + error);
+            let error = testError(expectedTotal, actualTotalWeight);
+            console.log("Error = %" + error);
 
             console.log("----")
 
@@ -113,10 +113,10 @@ describe("MaGaugeV2Upgradeable: Deposits and weights tests", function () {
 
         // it is expected to have an error in total weight due to the maturity precision
         // and the lack of calculation precision when calculating multiplier
-        let error = testError(expectedTotal, actualTotalWeight);
         console.log("Exp weight = " + expectedTotal);
         console.log("Act weight = " + actualTotalWeight);
-        console.log("Error = " + error);
+        let error = testError(expectedTotal, actualTotalWeight);
+        console.log("Error = %" + error);
 
     });
 

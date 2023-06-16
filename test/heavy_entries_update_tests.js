@@ -28,7 +28,7 @@ describe("MaGaugeV2Upgradeable: Heavy entries update test", function () {
 
         let count = 300; // amount of deposits made before sync post 6 weeks
         let maxDelta = 3600; // the max delta between deposits
-        let syncDelay = MATURITY_INCREMENT * 2; // delay after deposits
+        let syncDelay = MATURITY_INCREMENT; // delay after deposits
         let times = 3; // how many times the test should be repeated
 
         let depositAmounts = [];
@@ -82,10 +82,10 @@ describe("MaGaugeV2Upgradeable: Heavy entries update test", function () {
                 let actualTotalWeight = await maNFT.totalWeight();
     
                 // it is expected to have an error in weight increment due to the maturity precision
-                let error = testError(expectedTotal, actualTotalWeight);
                 console.log("Exp weight = " + expectedTotal);
                 console.log("Act weight = " + actualTotalWeight);
-                console.log("Error = " + error);
+                let error = testError(expectedTotal, actualTotalWeight);
+                console.log("Error = %" + error);
     
                 console.log("----")
     
@@ -128,6 +128,8 @@ describe("MaGaugeV2Upgradeable: Heavy entries update test", function () {
 
             // it is expected to have an error in total weight due to the maturity precision
             // and the lack of calculation precision when calculating multiplier
+            console.log("Exp weight = " + expectedTotal);
+            console.log("Act weight = " + actualTotalWeight);
             let error = testError(expectedTotal, actualTotalWeight);
 
             // if the delay was more than 6 weeks, all posisions must have the max multiplier
@@ -136,10 +138,8 @@ describe("MaGaugeV2Upgradeable: Heavy entries update test", function () {
     
                 expect(BigNumber.from(actualTotalWeight)).to.be.equal(expectedWeightFromLPSupply);
             }
-            
-            console.log("Exp weight = " + expectedTotal);
-            console.log("Act weight = " + actualTotalWeight);
-            console.log("Error = " + error);
+
+            console.log("Error = %" + error);
             console.log("----")
         }
 
