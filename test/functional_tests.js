@@ -403,7 +403,7 @@ describe("MaGaugeV2Upgradeable: Maturity-related basic functional tests", functi
         depositAmounts[idTo] = lpToPostMerge;
 
         // checking entry is correct
-        let expectedEntry = calculateNewEntry(lpToPreMerge, lpFromPreMerge, oldEntryFrom, oldEntryTo);
+        let expectedEntry = calculateNewEntry(lpToPreMerge, lpFromPreMerge, oldEntryTo, oldEntryFrom);
         let actualEntry = await maNFT._positionEntries(idTo);
 
         expect(BigNumber.from(actualEntry)).to.be.equal(expectedEntry);

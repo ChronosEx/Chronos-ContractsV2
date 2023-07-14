@@ -82,6 +82,10 @@ contract MaGaugeV2Upgradeable is
     event Merge(address indexed user, uint fromId, uint toId);
     event Increase(address indexed user, uint id, uint oldAmount, uint newAmount);
 
+    event DistributionSet(address distribution);
+    event InternalBribeSet(address bribe);
+    event EmergencyModeSet(bool isEmergency);
+
     modifier updateTotalWeight() {
         _updateTotalWeight();
         _;
@@ -89,13 +93,7 @@ contract MaGaugeV2Upgradeable is
 
     ///@dev the rewards are calculated based on total weight
     modifier updateReward(uint _maNFTId) {
-        rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = lastTimeRewardApplicable();
-        if (_maNFTId != 0) {
-            rewards[_maNFTId] = earned(_maNFTId);
-            _positionLastWeights[_maNFTId] = _lpBalances[_maNFTId] * _maturityMultiplier(_maNFTId);
-            idRewardPerTokenPaid[_maNFTId] = rewardPerTokenStored;
-        }
+        _updateReward(_maNFTId);
         _;
     }
 
@@ -112,7 +110,10 @@ contract MaGaugeV2Upgradeable is
         _;
     }
 
-    constructor() {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
     
     function initialize(
         address _rewardToken,
@@ -209,22 +210,26 @@ contract MaGaugeV2Upgradeable is
         require(_distribution != address(0), "zero addr");
         require(_distribution != DISTRIBUTION, "same addr");
         DISTRIBUTION = _distribution;
+        emit DistributionSet(DISTRIBUTION);
     }
 
     ///@notice set new internal bribe contract (where to send fees)
     function setInternalBribe(address _int) external onlyOwner {
-        require(_int >= address(0), "zero");
+        require(_int != address(0), "zero");
         internal_bribe = _int;
+        emit InternalBribeSet(internal_bribe);
     }
 
     function activateEmergencyMode() external onlyOwner {
         require(emergency == false);
         emergency = true;
+        emit EmergencyModeSet(emergency);
     }
 
     function stopEmergencyMode() external onlyOwner {
-        require(emergency == false);
+        require(emergency);
         emergency = false;
+        emit EmergencyModeSet(emergency);
     }
 
     /* -----------------------------------------------------------------------------
@@ -450,6 +455,7 @@ contract MaGaugeV2Upgradeable is
         updateReward(_maNFTIdFrom)
         updateReward(_maNFTIdTo)
     {
+        require(_maNFTIdFrom != _maNFTIdTo, "Can't merge the same token");
         require(
             _isApprovedOrOwner(_msgSender(), _maNFTIdFrom),
             "maNFT: caller is not token owner or approved"
@@ -458,6 +464,8 @@ contract MaGaugeV2Upgradeable is
             _isApprovedOrOwner(_msgSender(), _maNFTIdTo),
             "maNFT: caller is not token owner or approved"
         );
+
+        _getReward(_maNFTIdFrom);
 
         uint oldAmountTo = _lpBalances[_maNFTIdTo];
         uint oldMultiplierTo = _maturityMultiplier(_maNFTIdTo);
@@ -496,6 +504,8 @@ contract MaGaugeV2Upgradeable is
             "maNFT: caller is not token owner or approved"
         );
 
+        _getReward(_maNFTId);
+
         // limit the weights length to avoid out of gas
         require(weights.length <= MAX_SPLIT_WEIGHTS, "Max splitted positions exceeded");
 
@@ -510,9 +520,12 @@ contract MaGaugeV2Upgradeable is
             _mint(_msgSender(), _newMANFTId); // potentially, use ownerOf(_maNFTId)
             tokenId++;
 
+            _updateReward(_newMANFTId);
+
             _lpBalances[_newMANFTId] = splitAmount;
             _positionEntries[_newMANFTId] = _positionEntries[_maNFTId];
             _nftToEpochIds[_newMANFTId] = _nftToEpochIds[_maNFTId];
+            _positionLastWeights[_newMANFTId] = _positionLastWeights[_maNFTId];
         }
 
         // bps accuracy is used for e.g.
@@ -596,6 +609,10 @@ contract MaGaugeV2Upgradeable is
     function getReward(
         uint _maNFTId
     ) public nonReentrant updateTotalWeight updateReward(_maNFTId) {
+        _getReward(_maNFTId);
+    }
+
+    function _getReward(uint _maNFTId) private {
         require(
             _isApprovedOrOwner(_msgSender(), _maNFTId),
             "maNFT: caller is not token owner or approved"
@@ -641,6 +658,7 @@ contract MaGaugeV2Upgradeable is
 
         // calculate total weight
         _totalWeight = totalWeightWithoutLimit + _lpTotalSupplyPostLimit * MATURITY_PRECISION * 3 - totalWeightDecrement;
+        require(_totalWeight >= _lpTotalSupplyPreLimit * MATURITY_PRECISION + _lpTotalSupplyPostLimit * MATURITY_PRECISION * 3, "Total weight is incorrect");
         _lastTotalWeightUpdateTime = block.timestamp;
     }
 
@@ -691,17 +709,20 @@ contract MaGaugeV2Upgradeable is
     }
 
     ///@dev calculates new entry based on the merged position entries and amounts
-    function _getNewEntry(uint firstEntry, uint secondEntry, uint oldAmount, uint amountIncrement) private view returns(uint) {
+    function _getNewEntry(uint firstEntry, uint secondEntry, uint firstAmount, uint secondAmount) private view returns(uint) {
         uint olderEntry;
         uint entryDiff;
-        if (firstEntry > secondEntry) {
+        uint addedAmount;
+        if (firstEntry < secondEntry) {
             olderEntry = firstEntry;
-            entryDiff = firstEntry - secondEntry;
+            entryDiff = secondEntry - firstEntry;
+            addedAmount = secondAmount;
         } else {
             olderEntry = secondEntry;
-            entryDiff = secondEntry - firstEntry;
+            entryDiff = firstEntry - secondEntry;
+            addedAmount = firstAmount;
         }
-        uint newEntry = (olderEntry * ENTRY_CALCULATION_PRECISION - entryDiff * amountIncrement * ENTRY_CALCULATION_PRECISION / (oldAmount + amountIncrement)) / ENTRY_CALCULATION_PRECISION;
+        uint newEntry = (olderEntry * ENTRY_CALCULATION_PRECISION + entryDiff * addedAmount * ENTRY_CALCULATION_PRECISION / (firstAmount + secondAmount)) / ENTRY_CALCULATION_PRECISION;
         return newEntry;
     }
 
@@ -752,7 +773,7 @@ contract MaGaugeV2Upgradeable is
         _reduceLP(id, amount);
         _lpBalances[id] -= amount;
         // not sure if last weight needs to be updated here or only after rewards calculation
-        _positionLastWeights[id] = weight;
+        _positionLastWeights[id] = 0;
     }
 
     ///@dev reduces weight due to the possible error in total weight precision, it's possible sum(position weight) is slightly > total weight. the following processing is to avoid underflow
@@ -856,8 +877,8 @@ contract MaGaugeV2Upgradeable is
 
             if (_fees0 > 0) {
                 fees0 = 0;
-                IERC20(_token0).approve(internal_bribe, 0);
-                IERC20(_token0).approve(internal_bribe, _fees0);
+                IERC20(_token0).safeApprove(internal_bribe, 0);
+                IERC20(_token0).safeApprove(internal_bribe, _fees0);
                 IBribe(internal_bribe).notifyRewardAmount(_token0, _fees0);
             } else {
                 fees0 = _fees0;
@@ -871,6 +892,16 @@ contract MaGaugeV2Upgradeable is
                 fees1 = _fees1;
             }
             emit ClaimFees(_msgSender(), claimed0, claimed1);
+        }
+    }
+
+    function _updateReward(uint _maNFTId) private {
+        rewardPerTokenStored = rewardPerToken();
+        lastUpdateTime = lastTimeRewardApplicable();
+        if (_maNFTId != 0) {
+            rewards[_maNFTId] = earned(_maNFTId);
+            _positionLastWeights[_maNFTId] = _lpBalances[_maNFTId] * _maturityMultiplier(_maNFTId);
+            idRewardPerTokenPaid[_maNFTId] = rewardPerTokenStored;
         }
     }
 

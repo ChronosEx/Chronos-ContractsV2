@@ -73,10 +73,16 @@ module.exports.multiplier = function multiplier(entry, currentTime) {
     else return (BigNumber.from(maturity).mul(MATURITY_PRECISION).div(MATURITY_INCREMENT)).add(MATURITY_PRECISION);
 }
 
-module.exports.calculateNewEntry = function(oldAmount, newAmount, oldEntry, newEntry) {
-    let olderEntry = BigNumber.from(Math.max(oldEntry, newEntry));
-    let entryDiff = BigNumber.from(Math.max(oldEntry, newEntry)).sub(BigNumber.from(Math.min(oldEntry, newEntry)));
-    let result = ((olderEntry.mul(ENTRY_CALCULATION_PRECISION)).sub((entryDiff.mul(newAmount).mul(ENTRY_CALCULATION_PRECISION)).div(oldAmount.add(newAmount)))).div(ENTRY_CALCULATION_PRECISION);
+module.exports.calculateNewEntry = function(firstAmount, secondAmount, firstEntry, secondEntry) {
+    let olderEntry = BigNumber.from(Math.min(firstEntry, secondEntry));
+    let entryDiff = BigNumber.from(Math.max(firstEntry, secondEntry)).sub(BigNumber.from(Math.min(firstEntry, secondEntry)));
+    let addedAmount;
+    if (firstEntry < secondEntry) {
+        addedAmount = secondAmount;
+    } else {
+        addedAmount = firstAmount;
+    }
+    let result = ((olderEntry.mul(ENTRY_CALCULATION_PRECISION)).add((entryDiff.mul(addedAmount).mul(ENTRY_CALCULATION_PRECISION)).div(firstAmount.add(secondAmount)))).div(ENTRY_CALCULATION_PRECISION);
     
     return result;
 }
