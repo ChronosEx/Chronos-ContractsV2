@@ -282,6 +282,7 @@ contract MaGaugeV2Upgradeable is
         } else {
 
             uint weightWithoutPrecision = _totalWeight / MATURITY_PRECISION;
+            require(weightWithoutPrecision > 0, "Incorrect weight");
             
             return
                 rewardPerTokenStored +
