@@ -280,11 +280,14 @@ contract MaGaugeV2Upgradeable is
         if (_totalWeight == 0) {
             return rewardPerTokenStored;
         } else {
+
+            uint weightWithoutPrecision = _totalWeight / MATURITY_PRECISION;
+            
             return
                 rewardPerTokenStored +
                 (((lastTimeRewardApplicable() - lastUpdateTime) *
                     rewardRate *
-                    1e18) / _totalWeight);
+                    1e18) / weightWithoutPrecision);
         }
     }
 
