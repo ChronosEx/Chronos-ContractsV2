@@ -21,7 +21,7 @@ interface IGaugeFactory {
     function gaugeOwner() external view returns(address gaugeOwner);
 }
 
-contract MaGaugeV2Upgradeable is
+contract CLMaGaugeV2Upgradeable is
     ReentrancyGuardUpgradeable,
     ERC721EnumerableUpgradeable
 {
@@ -157,53 +157,24 @@ contract MaGaugeV2Upgradeable is
         emergency = false;                      // emergency flag
 
         //set NFT info:
-        bool _stable = IPair(_token).isStable();
-        address _token0;
-        address _token1;
-        (_token0, _token1) = IPair(_token).tokens();
-
-        string memory _name;
-        string memory _symbol;
-
-        if (_stable) {
-            _name = string(
-                abi.encodePacked(
-                    "Maturity NFT: Stable ",
-                    IERC20s(_token0).symbol(),
-                    "/",
-                    IERC20s(_token1).symbol()
-                )
-            );
-            _symbol = string(
-                abi.encodePacked(
-                    "maNFT_S-",
-                    IERC20s(_token0).symbol(),
-                    "/",
-                    IERC20s(_token1).symbol()
-                )
-            );
-        } else {
-            _name = string(
-                abi.encodePacked(
-                    "Maturity NFT: Volatile ",
-                    IERC20s(_token0).symbol(),
-                    "/",
-                    IERC20s(_token1).symbol()
-                )
-            );
-            _symbol = string(
-                abi.encodePacked(
-                    "maNFT_V-",
-                    IERC20s(_token0).symbol(),
-                    "/",
-                    IERC20s(_token1).symbol()
-                )
-            );
-        }
+    
+        string memory _name = string(
+            abi.encodePacked(
+                "MaturityV2 NFT: ",
+                IPair(_token).name()
+            )
+        );
+        string memory _symbol = string(
+            abi.encodePacked(
+                "maNFTV2_",
+                IPair(_token).symbol()
+            )
+        );
         __ERC721_init(_name, _symbol);
-
         tokenId = 1;
         emit Transfer(address(0), address(this), 0);
+
+        
     }
 
     /* -----------------------------------------------------------------------------

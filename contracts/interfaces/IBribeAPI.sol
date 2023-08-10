@@ -26,6 +26,7 @@ interface IBribeAPI {
     function rewardsPerEpoch(address token,uint ts) external view returns (uint);
     function supplyCheckpoints(uint _index) external view returns(uint timestamp, uint supplyd);
     function earned(uint tokenId, address token) external view returns (uint);
+    function earned(address _user, address token) external view returns (uint);
     function firstBribeTimestamp() external view returns(uint);
     function totalSupplyAt(uint256 _timestamp) external view returns (uint256);
     function balanceOfAt(uint256 tokenId, uint256 _timestamp) external view returns (uint256);
