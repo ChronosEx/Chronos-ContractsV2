@@ -568,7 +568,7 @@ contract CLMaGaugeV2Upgradeable is
             _lpBalances[_newMANFTId] = splitAmount;
             _positionEntries[_newMANFTId] = _positionEntries[_maNFTId];
             _nftToEpochIds[_newMANFTId] = _nftToEpochIds[_maNFTId];
-            _positionLastWeights[_newMANFTId] = _positionLastWeights[_maNFTId];
+            _positionLastWeights[_newMANFTId] = splitAmount * _maturityMultiplier(_maNFTId);
         }
 
         // bps accuracy is used for e.g.
