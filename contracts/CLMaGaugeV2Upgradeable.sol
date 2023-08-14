@@ -646,16 +646,6 @@ contract CLMaGaugeV2Upgradeable is
         }
     }
 
-    function getRewardFromVoter(
-        address _user
-    ) public onlyDistribution {
-
-        uint[] memory tokenIds = tokensOfOwner(_user);
-        uint len = tokenIds.length;
-        for (uint i; i < len; i++) {
-            getReward(tokenIds[i]);
-        }
-    }
 
     ///@notice User harvest function
     function getReward(
