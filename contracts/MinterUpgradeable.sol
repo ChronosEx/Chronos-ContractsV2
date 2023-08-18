@@ -4,7 +4,7 @@ pragma solidity 0.8.13;
 import "./libraries/Math.sol";
 import "./interfaces/IMinter.sol";
 import "./interfaces/IChronos.sol";
-import "./interfaces/IVoter.sol";
+import "./interfaces/IVoterV3.sol";
 import "./interfaces/IVotingEscrow.sol";
 import "./interfaces/IProtocolAirdrop.sol";
 
@@ -37,7 +37,7 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
     address public pendingTeam;
     
     IChronos public _chronos;
-    IVoter public _voter;
+    IVoterV3 public _voter;
     IVotingEscrow public _ve;
     IProtocolAirdrop public _protocolAirdrop;
 
@@ -61,7 +61,7 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
         TAIL_EMISSION = 2;
 
         _chronos = IChronos(IVotingEscrow(__ve).token());
-        _voter = IVoter(__voter);
+        _voter = IVoterV3(__voter);
         _ve = IVotingEscrow(__ve);
         _protocolAirdrop = IProtocolAirdrop(__protocolAirdrop);
 
@@ -94,7 +94,7 @@ contract MinterUpgradeable is IMinter, OwnableUpgradeable {
     function setVoter(address __voter) external {
         require(__voter != address(0));
         require(msg.sender == team, "not team");
-        _voter = IVoter(__voter);
+        _voter = IVoterV3(__voter);
     }
 
     function setTeamRate(uint _teamRate) external {
